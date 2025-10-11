@@ -1,0 +1,3 @@
+[submodule "encodec/encodec"]
+	path = encodec/encodec
+	url = https://github.com/facebookresearch/encodec.git
