@@ -1,88 +1,84 @@
-import json
-import re
-from typing import List, Union
+from typing import List
+
+from transformers import WhisperTokenizer
 
 
 class TextTokenizer:
     """
-    Basic tokenizer for TTS.
-    Can operate in two modes:
-        - 'char': character-level tokenization
-        - 'phoneme': uses pre-tokenized phoneme sequences
+    Tokenizer wrapper for TTS.
+    Can use:
+        - 'char' mode (original)
+        - 'whisper' mode (BPE from OpenAI Whisper)
     """
 
-    def __init__(self, vocab_path: str, mode: str = "char"):
-        """
-        Args:
-            vocab_path: optional path to load/save vocabulary
-            mode: 'char' or 'phoneme'
-        """
-        assert mode in ("char", "phoneme"), "mode must be 'char' or 'phoneme'"
+    def __init__(self, mode="char", vocab_path=None):
+        assert mode in ("char", "whisper"), "mode must be 'char' or 'whisper'"
         self.mode = mode
-        self.vocab = {}
-        self.inv_vocab = {}
-        if vocab_path:
-            self.load_vocab(vocab_path)
 
-    # ----------------------------------------------------
-    # Vocabulary utilities
-    # ----------------------------------------------------
-    def build_vocab(self, texts: List[str]):
-        """
-        Build vocabulary from training corpus.
-        """
-        if self.mode == "char":
-            symbols = sorted(set("".join(texts)))
+        if self.mode == "whisper":
+            # load pretrained Whisper tokenizer
+            self.tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
         else:
-            # expects space-separated phoneme strings like "HH AH L OW"
-            tokens = set()
-            for line in texts:
-                tokens.update(line.strip().split())
-            symbols = sorted(tokens)
+            self.vocab = {}
+            self.inv_vocab = {}
+            if vocab_path:
+                self.load_vocab(vocab_path)
 
-        # add special tokens
+    # ------------------------
+    # Char-mode methods
+    # ------------------------
+    def build_vocab(self, texts: List[str]):
+        if self.mode != "char":
+            raise NotImplementedError("build_vocab only works in char mode")
+        symbols = sorted(set("".join(texts)))
         symbols = ["<pad>", "<unk>", "<bos>", "<eos>"] + symbols
         self.vocab = {s: i for i, s in enumerate(symbols)}
         self.inv_vocab = {i: s for s, i in self.vocab.items()}
         return self.vocab
 
     def save_vocab(self, path: str):
+        if self.mode != "char":
+            raise NotImplementedError("save_vocab only works in char mode")
+        import json
         with open(path, "w") as f:
             json.dump(self.vocab, f, ensure_ascii=False, indent=2)
 
     def load_vocab(self, path: str):
+        if self.mode != "char":
+            raise NotImplementedError("load_vocab only works in char mode")
+        import json
         with open(path, "r") as f:
             self.vocab = json.load(f)
         self.inv_vocab = {i: s for s, i in self.vocab.items()}
 
-    # ----------------------------------------------------
+    # ------------------------
     # Encoding / Decoding
-    # ----------------------------------------------------
+    # ------------------------
     def encode(self, text: str) -> List[int]:
-        """
-        Convert text to list of token IDs.
-        """
-        if self.mode == "char":
-            tokens = list(text.strip())
+        if self.mode == "whisper":
+            # encode text to BPE token IDs
+            return self.tokenizer(text).input_ids
         else:
-            tokens = text.strip().split()
-
-        ids = [self.vocab.get("<bos>")]
-        for t in tokens:
-            ids.append(self.vocab.get(t, self.vocab["<unk>"]))
-        ids.append(self.vocab.get("<eos>"))
-        return ids
+            tokens = list(text.strip())
+            ids = [self.vocab.get("<bos>")]
+            for t in tokens:
+                ids.append(self.vocab.get(t, self.vocab["<unk>"]))
+            ids.append(self.vocab.get("<eos>"))
+            return ids
 
     def decode(self, ids: List[int]) -> str:
-        """
-        Convert list of token IDs back to text or phoneme string.
-        """
-        tokens = [self.inv_vocab.get(i, "<unk>") for i in ids]
-        tokens = [t for t in tokens if t not in ("<pad>", "<bos>", "<eos>")]
-        return "".join(tokens) if self.mode == "char" else " ".join(tokens)
+        if self.mode == "whisper":
+            # decode BPE token IDs back to text
+            return self.tokenizer.decode(ids)
+        else:
+            tokens = [self.inv_vocab.get(i, "<unk>") for i in ids]
+            tokens = [t for t in tokens if t not in ("<pad>", "<bos>", "<eos>")]
+            return "".join(tokens)
 
-    # ----------------------------------------------------
+    # ------------------------
     # Utility
-    # ----------------------------------------------------
+    # ------------------------
     def __len__(self):
+        if self.mode == "whisper":
+            return self.tokenizer.vocab_size
         return len(self.vocab)
