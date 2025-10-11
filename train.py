@@ -10,34 +10,25 @@ from .dataset import LJSpeechDataset, collate_fn
 from .model.tts_model import TTSModel
 
 
-# ------------------------
-# 3️⃣ Main training loop
-# ------------------------
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # --------------------
-    # 1. Load tokenizer and EnCodec
-    # --------------------
+    # Load tokenizer and EnCodec
     tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
     encodec_model = EncodecModel.encodec_model_24khz()
     encodec_model.eval()
     encodec_model.to(device)
 
-    # --------------------
-    # 2. Dataset & DataLoader
-    # --------------------
+    # Dataset & DataLoader
     dataset = LJSpeechDataset(
         metadata_path="metadata.csv",
         audio_dir="wavs",
         tokenizer=tokenizer,
         encodec=encodec_model
     )
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
 
-    # --------------------
-    # 3. Model
-    # --------------------
+    # Model
     text_vocab_size = tokenizer.vocab_size
     text_embed_dim = 512
     text_num_layers = 6
@@ -51,9 +42,7 @@ def main():
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    # --------------------
-    # 4. Training loop
-    # --------------------
+    # Training loop
     for epoch in range(10):
         model.train()
         total_loss = 0
