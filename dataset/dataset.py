@@ -1,26 +1,32 @@
 import torch
 import torch.utils.data as Dataset
 import torchaudio
+from datasets import load_dataset
 
 
 class LJSpeechDataset(Dataset):
-    def __init__(self, metadata_path, audio_dir, tokenizer, encodec, sample_rate=24000):
+    def __init__(self, dataset, audio_dir, tokenizer, encodec, sample_rate=24000, num_samples=100):
         """
-        metadata_path: LJSpeech metadata CSV/TSV with format: id|text|file_path
+        dataset: path to dataset on huggingface
         audio_dir: path to audio files
         tokenizer: Whisper tokenizer
         encodec: pretrained EnCodec encoder
+        sample_rate: target sample rate for audio, will resample if different
+        num_samples: number of samples to load from the dataset
         """
         self.samples = []
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("|")
-                if len(parts) >= 3:
-                    self.samples.append((parts[1], parts[2]))  # text, file_path
+        dataset = load_dataset("MikhailT/lj-speech", split="train")
         self.audio_dir = audio_dir
         self.tokenizer = tokenizer
         self.encodec = encodec
         self.sample_rate = sample_rate
+        self.num_samples = num_samples
+        for i, item in enumerate(dataset):
+            text = item["text"]
+            audio_path = item["audio"]["path"]
+            self.samples.append((text, audio_path))
+            if i + 1 >= num_samples:
+                break
 
     def __len__(self):
         return len(self.samples)
@@ -48,6 +54,15 @@ class LJSpeechDataset(Dataset):
 # Utils
 # ------------------------
 def collate_fn(batch):
+    """
+    Collate function to pad sequences in the batch
+    Args:
+        batch: list of tuples (token_ids, encodec_out)
+    Returns:
+        token_ids_batch: [batch, max_seq_len] padded token IDs
+        encodec_batch: list of [batch, max_seq_len] padded encodec tokens per quantizer
+    """
+    
     # batch: list of tuples (token_ids, encodec_out)
     token_ids_list, encodec_list = zip(*batch)
 
