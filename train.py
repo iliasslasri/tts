@@ -2,12 +2,13 @@
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+import torchaudio
 from transformers import WhisperTokenizer
 
-from encodec import EncodecModel
+from encodec.encodec.encodec import EncodecModel
 
-from .dataset import LJSpeechDataset, collate_fn
-from .model.tts_model import TTSModel
+from dataset import LJSpeechDataset, collate_fn
+from model.tts_model import TTSModel
 
 
 def main():
@@ -21,7 +22,7 @@ def main():
 
     # Dataset & DataLoader
     dataset = LJSpeechDataset(
-        metadata_path="metadata.csv",
+        dataset_path_hf="MikhailT/lj-speech",
         audio_dir="wavs",
         tokenizer=tokenizer,
         encodec=encodec_model
@@ -64,7 +65,20 @@ def main():
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        
+
+            # print loss every batch
+            print(f"Batch Loss: {loss.item()}")
+
+            # reconstruct audio from predicted tokens for monitoring
+            if epoch % 1 == 0:
+                with torch.no_grad():
+                    # take argmax as predicted tokens for now (TODO)
+                    pred_tokens = [torch.argmax(logit, dim=-1) for logit in logits]
+                    # pred_tokens: list of [B, L] per quantizer
+                    reconstructed = encodec_model.decode(pred_tokens)
+                    # reconstructed: [B, 1, T]
+                    torchaudio.save(f"reconstructed_epoch{epoch}.wav", reconstructed.cpu(), 24000)
+
         print(f"Epoch {epoch} - Loss: {total_loss / len(dataloader)}")
 
 if __name__ == "__main__":

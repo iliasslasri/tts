@@ -5,18 +5,16 @@ from datasets import load_dataset
 
 
 class LJSpeechDataset(Dataset):
-    def __init__(self, dataset, audio_dir, tokenizer, encodec, sample_rate=24000, num_samples=100):
+    def __init__(self, dataset_path_hf, tokenizer, encodec, sample_rate=24000, num_samples=100):
         """
         dataset: path to dataset on huggingface
-        audio_dir: path to audio files
         tokenizer: Whisper tokenizer
         encodec: pretrained EnCodec encoder
         sample_rate: target sample rate for audio, will resample if different
         num_samples: number of samples to load from the dataset
         """
         self.samples = []
-        dataset = load_dataset("MikhailT/lj-speech", split="train")
-        self.audio_dir = audio_dir
+        dataset = load_dataset(dataset_path_hf, split="train")
         self.tokenizer = tokenizer
         self.encodec = encodec
         self.sample_rate = sample_rate
@@ -39,8 +37,10 @@ class LJSpeechDataset(Dataset):
         token_ids = torch.tensor(token_ids, dtype=torch.long)
 
         # Load audio
-        wav, sr = torchaudio.load(f"{self.audio_dir}/{file_path}")
-        wav = torchaudio.functional.resample(wav, sr, self.sample_rate)
+        file_path = self.samples[idx][1]
+        wav, sr = torchaudio.load(file_path)
+        if sr != self.sample_rate:
+            wav = torchaudio.functional.resample(wav, sr, self.sample_rate)
         wav = wav.mean(0, keepdim=True)  # convert to mono if stereo with mean of all channels
         wav = wav / wav.abs().max()  # normalize to -1 to 1
 
@@ -62,7 +62,7 @@ def collate_fn(batch):
         token_ids_batch: [batch, max_seq_len] padded token IDs
         encodec_batch: list of [batch, max_seq_len] padded encodec tokens per quantizer
     """
-    
+
     # batch: list of tuples (token_ids, encodec_out)
     token_ids_list, encodec_list = zip(*batch)
 
