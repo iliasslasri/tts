@@ -88,9 +88,17 @@ def main():
             # compute cross-entropy for each quantizer
             loss = 0
             for i in range(encodec_num_quantizers):
-                # [B, L, C] -> [B, C, L] for F.cross_entropy
-                pred = logits[i].transpose(1, 2)
-                target = encodec_batch[i]
+                pred = logits[i].transpose(1, 2)  # [B, C, L_pred]
+                target = encodec_batch[i]         # [B, L_target]
+
+                # Match sequence lengths
+                L_pred = pred.shape[-1]
+                L_target = target.shape[-1]
+                min_len = min(L_pred, L_target)
+
+                pred = pred[..., :min_len]
+                target = target[..., :min_len]
+
                 loss += F.cross_entropy(pred, target)
             
             loss.backward()
