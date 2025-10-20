@@ -6,8 +6,9 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import torchaudio
+import whisper
 from torch.utils.data import DataLoader
-from transformers import GPT2Tokenizer
+from transformers import WhisperTokenizer
 
 from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
@@ -21,7 +22,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load tokenizer and EnCodec
-    tokenizer = GPT2Tokenizer.from_pretrained("distilgpt2")
+    tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
     tokenizer.set_prefix_tokens(language="en", task="transcribe")
     encodec_model = EncodecModel.encodec_model_24khz()
     encodec_model.eval()
@@ -35,7 +36,8 @@ def main():
     # Parse the transcripts
     pattern = re.compile(r'^\(\s*(\S+)\s+"(.+)"\s*\)$')
     rows = []
-
+    normalizer = whisper.normalizers.EnglishTextNormalizer()
+    
     with open(text_file, "r") as f:
         for line in f:
             match = pattern.search(line)
@@ -45,7 +47,7 @@ def main():
                 wav_path = wav_dir / f"{file_id}.wav"
                 wav_path = os.path.abspath(os.path.join(BASE_DIR, wav_path))
                 print(wav_path)
-                rows.append({"file_id": file_id, "text": text, "path": str(wav_path)})
+                rows.append({"file_id": file_id, "text": normalizer(text), "path": str(wav_path)})
 
     df = pd.DataFrame(rows)
     print(f"All audio files: {len(df)}")
