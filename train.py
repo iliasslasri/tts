@@ -9,6 +9,7 @@ import torchaudio
 import whisper
 from torch.utils.data import DataLoader
 from transformers import WhisperTokenizer
+from whisper_normalizer.english import EnglishTextNormalizer
 
 from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
@@ -36,7 +37,7 @@ def main():
     # Parse the transcripts
     pattern = re.compile(r'^\(\s*(\S+)\s+"(.+)"\s*\)$')
     rows = []
-    normalizer = whisper.normalizers.EnglishTextNormalizer()
+    english_normalizer = EnglishTextNormalizer()
     
     with open(text_file, "r") as f:
         for line in f:
@@ -47,7 +48,7 @@ def main():
                 wav_path = wav_dir / f"{file_id}.wav"
                 wav_path = os.path.abspath(os.path.join(BASE_DIR, wav_path))
                 print(wav_path)
-                rows.append({"file_id": file_id, "text": normalizer(text), "path": str(wav_path)})
+                rows.append({"file_id": file_id, "text": english_normalizer(text), "path": str(wav_path)})
 
     df = pd.DataFrame(rows)
     print(f"All audio files: {len(df)}")
