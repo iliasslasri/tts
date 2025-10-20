@@ -1,27 +1,27 @@
+import os
+
 import torch
-import torch.utils.data as Dataset
 import torchaudio
-from datasets import load_dataset
+from torch.utils.data import Dataset
 
 
 class LJSpeechDataset(Dataset):
-    def __init__(self, dataset_path_hf, tokenizer, encodec, sample_rate=24000, num_samples=100):
+    def __init__(self, dataset, tokenizer, encodec, sample_rate=24000, num_samples=100):
         """
-        dataset: path to dataset on huggingface
+        dataset: pandas DataFrame
         tokenizer: Whisper tokenizer
         encodec: pretrained EnCodec encoder
         sample_rate: target sample rate for audio, will resample if different
         num_samples: number of samples to load from the dataset
         """
         self.samples = []
-        dataset = load_dataset(dataset_path_hf, split="train")
         self.tokenizer = tokenizer
         self.encodec = encodec
         self.sample_rate = sample_rate
         self.num_samples = num_samples
-        for i, item in enumerate(dataset):
-            text = item["text"]
-            audio_path = item["audio"]["path"]
+        for i in range(len(dataset)):
+            text = dataset.loc[i, "text"]
+            audio_path = dataset.loc[i,"path"]
             self.samples.append((text, audio_path))
             if i + 1 >= num_samples:
                 break
@@ -43,8 +43,9 @@ class LJSpeechDataset(Dataset):
             wav = torchaudio.functional.resample(wav, sr, self.sample_rate)
         wav = wav.mean(0, keepdim=True)  # convert to mono if stereo with mean of all channels
         wav = wav / wav.abs().max()  # normalize to -1 to 1
-
         # Encode audio to EnCodec discrete tokens
+        device = next(self.encodec.parameters()).device
+        wav = wav.unsqueeze(1).to(device)
         with torch.no_grad():
             encodec_out = self.encodec.encode(wav)  
             # encodec_out: list of [B, seq_len] per quantizer
@@ -74,14 +75,21 @@ def collate_fn(batch):
         token_ids_batch[i, :len(x)] = x
 
     # pad encodec per quantizer
-    num_quantizers = len(encodec_list[0])
+    num_quantizers = encodec_list[0][0][0].shape[1]
     encodec_batch = []
+    # import ipdb
+    # ipdb.set_trace()
     for q in range(num_quantizers):
-        seqs = [e[q].squeeze(0) for e in encodec_list]  # remove channel
-        max_seq = max([len(s) for s in seqs])
-        padded = torch.zeros(len(batch), max_seq, dtype=torch.long)
+        # Extract the q-th quantizer sequence for each sample
+        seqs = [e[0][0][0][q].cpu() for e in encodec_list]  # shape: [seq_len]
+
+        max_seq = max(s.size(0) for s in seqs)
+
+        # Pad each sequence to max length
+        padded = torch.zeros(len(seqs), max_seq, dtype=torch.long)
         for i, s in enumerate(seqs):
             padded[i, :len(s)] = s
+
         encodec_batch.append(padded)
     
     return token_ids_batch, encodec_batch

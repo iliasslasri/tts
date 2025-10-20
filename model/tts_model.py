@@ -43,6 +43,7 @@ class TTSModel(nn.Module):
             nn.Linear(text_embed_dim, encodec_codebook_size) 
             for _ in range(encodec_num_quantizers)
         ])
+        
 
     def forward(self, token_ids):
         """
