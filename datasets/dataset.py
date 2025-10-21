@@ -96,7 +96,6 @@ def collate_fn(batch):
     return token_ids_batch, encodec_batch
 
 def safe_load_wav(path, sample_rate=24000):
-    print("PATH", path)
     try:
         wav, sr = torchaudio.load(path)
         if sr != sample_rate:

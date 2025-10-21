@@ -1,13 +1,15 @@
 # train.py
 import re
+import time
 from pathlib import Path
 
 import pandas as pd
 import torch
 import torch.nn.functional as F
 import torchaudio
-import whisper
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torchinfo import summary
 from transformers import WhisperTokenizer
 from whisper_normalizer.english import EnglishTextNormalizer
 
@@ -15,7 +17,8 @@ from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
 
-NUM_SAMPLES = 10
+NUM_SAMPLES = 1
+N_EPOCHS = int(10e4)
 BASE_DIR = "/home/iliass/tts/"
 SAMPLE_RATE = 24_000
 
@@ -25,6 +28,7 @@ N_QUANTIZERS = 32
 BATCH_SZ = 1
 
 def main():
+    writer = SummaryWriter(log_dir=f"runs/tts_{int(time.time())}")
     device = "cpu" if torch.cuda.is_available() else "cpu"
 
     # Load tokenizer and EnCodec
@@ -73,12 +77,32 @@ def main():
     )
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    print("-"*100)
+    print("SUMMARY OF MODEL")
+    print("-"*100)
+    token_ids_example = torch.randint(0, tokenizer.vocab_size, (1, 11), dtype=torch.long)
+    rvq_token_ids_example = torch.randint(0, N_BINS, (1, 300, N_QUANTIZERS), dtype=torch.long)
+
+    # Move to device if needed
+    token_ids_example = token_ids_example.to(device)
+    rvq_token_ids_example = rvq_token_ids_example.to(device)
+
+    summary(model, input_data=(token_ids_example, rvq_token_ids_example))
+
+    print(model)
+    print("Total params:", sum(p.numel() for p in model.parameters()))
+    print("Trainable params:", sum(p.numel() for p in model.parameters() if p.requires_grad))
+    print("-"*100)
+    print("-"*100)
 
     # Training loop
-    for epoch in range(10):
+    for epoch in range(N_EPOCHS):
         model.train()
         total_loss = 0
+        batch_idx = 0
         for token_ids, encodec_batch in dataloader:
+            global_step = epoch * len(dataloader) + batch_idx
+            batch_idx += 1 
             token_ids = token_ids.to(device)
             encodec_batch = [q.to(device) for q in encodec_batch]
 
@@ -115,11 +139,13 @@ def main():
             loss = F.cross_entropy(pred, target_onehot)
         
             loss.backward()
+
+            # print loss every batch
+            writer.add_scalar("Loss/train", loss.item(), global_step)
+
             optimizer.step()
             total_loss += loss.item()
 
-            # print loss every batch
-            print(f"Batch Loss: {loss.item()}")
 
             # reconstruct audio from predicted tokens for monitoring
             if epoch % 1 == 0:
@@ -130,13 +156,13 @@ def main():
                     pred_tokens = torch.argmax(logits, dim=-1)
                     # pred_tokens: list of [B, L] per quantizer
                     pred_list = [pred_tokens[..., i] for i in range(N_QUANTIZERS)]
-                    pred_tokens_tensor = torch.stack(pred_list, dim=0)
+                    pred_tokens_tensor = torch.stack(pred_list, dim=1)
                     encoded_frames = [(pred_tokens_tensor, None)]
                     reconstructed = encodec_model.decode(encoded_frames)
                     # reconstructed: [B, 1, T]
-                    torchaudio.save(f"reconstructed_epoch{epoch}.wav", reconstructed.cpu(), 24000)
+                    torchaudio.save(f"reconstructed_epoch{epoch}.wav", reconstructed[0].cpu(), SAMPLE_RATE)
 
         print(f"Epoch {epoch} - Loss: {total_loss / len(dataloader)}")
-
+    writer.close()
 if __name__ == "__main__":
     main()
