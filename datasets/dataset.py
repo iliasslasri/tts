@@ -33,12 +33,13 @@ class LJSpeechDataset(Dataset):
         text, file_path = self.samples[idx]
         
         # Tokenize text
-        token_ids = self.tokenizer.encode(text)
+        token_ids = self.tokenizer.encode(text, add_special_tokens=False)
         token_ids = torch.tensor(token_ids, dtype=torch.long)
 
         # Load audio
-        file_path = self.samples[idx][1]
-        wav, sr = torchaudio.load(file_path)
+        wav, sr = safe_load_wav(file_path)
+        if wav is None:
+            return self.__getitem__(idx+1)
         if sr != self.sample_rate:
             wav = torchaudio.functional.resample(wav, sr, self.sample_rate)
         wav = wav.mean(0, keepdim=True)  # convert to mono if stereo with mean of all channels
@@ -93,3 +94,14 @@ def collate_fn(batch):
         encodec_batch.append(padded)
     
     return token_ids_batch, encodec_batch
+
+def safe_load_wav(path, sample_rate=24000):
+    print("PATH", path)
+    try:
+        wav, sr = torchaudio.load(path)
+        if sr != sample_rate:
+            wav = torchaudio.functional.resample(wav, sr, sample_rate)
+        return wav, sample_rate
+    except Exception as e:
+        print(f"[WARN] Skipping bad file: {path} ({e})")
+        return None, None

@@ -15,23 +15,22 @@ from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
 
-NUM_SAMPLES = 10e3
+NUM_SAMPLES = 10
 BASE_DIR = "/home/iliass/tts/"
 SAMPLE_RATE = 24_000
 
 # RVQ
 N_BINS = 1024
 N_QUANTIZERS = 32
-BATCH_SZ = 2
+BATCH_SZ = 1
 
 def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu" if torch.cuda.is_available() else "cpu"
 
     # Load tokenizer and EnCodec
     tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
     tokenizer.set_prefix_tokens(language="en", task="transcribe")
     encodec_model = EncodecModel.encodec_model_24khz()
-    encodec_model.eval()
     encodec_model.to(device)
 
     # Dataset & DataLoader
@@ -70,7 +69,7 @@ def main():
 
     model = TTSModel(
         text_vocab_size, text_embed_dim, text_num_layers,
-        N_BINS, N_QUANTIZERS
+        N_BINS, N_QUANTIZERS, rvq_embed_dim=text_embed_dim
     )
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -85,24 +84,36 @@ def main():
 
             optimizer.zero_grad()
             assert token_ids.max() < tokenizer.vocab_size, "Token ID exceeds vocab size!"
-            logits = model(token_ids)  # list of [B, L, codebook_size] per quantizer
+            # encodec_batch: list of [B, L] per quantizer, length = N_QUANTIZERS
+            # Stack along last dimension: [B, L, N_QUANTIZERS]
+            rvq_targets = torch.stack(encodec_batch, dim=-1)  # [B, L, N_QUANTIZERS]
+
+            # For teacher forcing, shift right and add a <BOS> token 
+            bos_token = 0
+            rvq_input = torch.full((rvq_targets.shape[0], 1, N_QUANTIZERS), bos_token, dtype=torch.long, device=device)
+
+            # Concatenate BOS with all tokens except last
+            rvq_token_ids = torch.cat([rvq_input, rvq_targets[:, :-1, :]], dim=1)  # [B, L, N_QUANTIZERS]
+            
+            logits = model(token_ids, rvq_token_ids)  # list of [B, L, codebook_size] per quantizer
 
             # compute cross-entropy for each quantizer
-            loss = 0
-            for i in range(N_BINS):
-                pred = logits[i].transpose(1, 2)  # [B, C, L_pred]
-                target = encodec_batch[i]         # [B, L_target]
+            # loss = 0
+            # for i in range(N_BINS):
+            pred = logits
+            target = encodec_batch
 
-                # Match sequence lengths
-                L_pred = pred.shape[-1]
-                L_target = target.shape[-1]
-                min_len = min(L_pred, L_target)
-
-                pred = pred[..., :min_len]
-                target = target[..., :min_len]
-
-                loss += F.cross_entropy(pred, target)
-            
+            # import ipdb
+            # ipdb.set_trace()
+            # Ensure lengths match
+            target_stack = torch.stack(target, dim=2) 
+            L_pred, L_target = pred.shape[1], target_stack.shape[-2]
+            min_len = min(L_pred, L_target)
+            pred = pred[:, :min_len, :, :]
+            target_stack = target_stack[..., :min_len, :]
+            target_onehot = F.one_hot(target_stack, num_classes=N_BINS).float()
+            loss = F.cross_entropy(pred, target_onehot)
+        
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
@@ -113,10 +124,15 @@ def main():
             # reconstruct audio from predicted tokens for monitoring
             if epoch % 1 == 0:
                 with torch.no_grad():
+                    # import ipdb
+                    # ipdb.set_trace()
                     # take argmax as predicted tokens for now (TODO)
-                    pred_tokens = [torch.argmax(logit, dim=-1) for logit in logits]
+                    pred_tokens = torch.argmax(logits, dim=-1)
                     # pred_tokens: list of [B, L] per quantizer
-                    reconstructed = encodec_model.decode(pred_tokens)
+                    pred_list = [pred_tokens[..., i] for i in range(N_QUANTIZERS)]
+                    pred_tokens_tensor = torch.stack(pred_list, dim=0)
+                    encoded_frames = [(pred_tokens_tensor, None)]
+                    reconstructed = encodec_model.decode(encoded_frames)
                     # reconstructed: [B, 1, T]
                     torchaudio.save(f"reconstructed_epoch{epoch}.wav", reconstructed.cpu(), 24000)
 

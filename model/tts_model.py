@@ -7,7 +7,7 @@ from text_bone.text_encoder import TextEncoder
 
 class TTSModel(nn.Module):
     def __init__(self, text_vocab_size, text_embed_dim, text_num_layers,
-                 encodec_codebook_size, encodec_num_quantizers, rvq_embed_dim,
+                 encodec_codebook_size, encodec_num_quantizers, rvq_embed_dim=None,
                  num_decoder_layers=1, num_heads=1):
         """
         Args:
@@ -37,6 +37,8 @@ class TTSModel(nn.Module):
         # -------------------
         # RVQ decoder backbone
         # -------------------
+        if rvq_embed_dim is None:
+            rvq_embed_dim = text_embed_dim
         decoder_layer = nn.TransformerDecoderLayer(
             d_model=rvq_embed_dim,
             nhead=num_heads,
@@ -53,10 +55,11 @@ class TTSModel(nn.Module):
         # -------------------
         # Prediction heads for each quantizer
         # -------------------
-        self.quantizers = nn.ModuleList([
-            nn.Linear(rvq_embed_dim, encodec_codebook_size)
-            for _ in range(encodec_num_quantizers)
-        ])
+        # self.quantizers = nn.ModuleList([
+        #     nn.Linear(rvq_embed_dim, encodec_codebook_size)
+        #     for _ in range(encodec_num_quantizers)
+        # ])
+        self.quantize = nn.Linear(rvq_embed_dim, encodec_codebook_size)
         
 
     def forward(self, token_ids, rvq_token_ids):
@@ -73,19 +76,27 @@ class TTSModel(nn.Module):
 
         # Prepare RVQ input embeddings (shifted right for teacher forcing)
         tgt_emb = self.rvq_token_embed(rvq_token_ids)  # [B, L_audio, D]
+        # Flattening to 3D for the decoder
+        B, L, NQ, D = tgt_emb.shape
+        tgt_emb = tgt_emb.view(B, L * NQ, D)  # [B, L*NQ, D]
+        
         # Generate causal mask
-        tgt_len = rvq_token_ids.size(1)
+        tgt_len = tgt_emb.size(1)
         tgt_mask = torch.triu(torch.ones(tgt_len, tgt_len, device=rvq_token_ids.device) * float('-inf'), diagonal=1)
 
+        # import ipdb
+        # ipdb.set_trace()
         # Decoder
         decoded = self.decoder(
             tgt=tgt_emb,
             memory=memory,
-            tgt_mask=tgt_mask
+            tgt_mask=tgt_mask,
+            tgt_is_causal=True,
         )  # [B, L_audio, D]
-
+        decoded = decoded.view(B, L, NQ, D)
         decoded = F.dropout(decoded, p=0.1, training=self.training)
 
         # Predict code logits for each quantizer
-        logits = [q(decoded) for q in self.quantizers]
+        # logits = [q(decoded) for q in self.quantizers]
+        logits = self.quantize(decoded)
         return logits
