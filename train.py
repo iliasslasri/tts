@@ -16,10 +16,11 @@ from whisper_normalizer.english import EnglishTextNormalizer
 from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
+from pathlib import Path
 
 NUM_SAMPLES = 1
 N_EPOCHS = int(10e4)
-BASE_DIR = "/home/iliass/tts/"
+BASE_DIR = Path(__file__).resolve().parent
 SAMPLE_RATE = 24_000
 
 # RVQ
@@ -38,7 +39,7 @@ def main():
     encodec_model.to(device)
 
     # Dataset & DataLoader
-    root = Path("./cmu_us_awb_arctic")
+    root = Path("./datasets/cmu_us_awb_arctic")
     wav_dir = root / "wav"
     text_file = root / "etc" / "txt.done.data"
 
