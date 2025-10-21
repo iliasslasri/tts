@@ -122,13 +122,9 @@ def main():
             logits = model(token_ids, rvq_token_ids)  # list of [B, L, codebook_size] per quantizer
 
             # compute cross-entropy for each quantizer
-            # loss = 0
-            # for i in range(N_BINS):
             pred = logits
             target = encodec_batch
 
-            # import ipdb
-            # ipdb.set_trace()
             # Ensure lengths match
             target_stack = torch.stack(target, dim=2) 
             L_pred, L_target = pred.shape[1], target_stack.shape[-2]
@@ -137,7 +133,7 @@ def main():
             target_stack = target_stack[..., :min_len, :]
             target_onehot = F.one_hot(target_stack, num_classes=N_BINS).float()
             loss = F.cross_entropy(pred, target_onehot)
-        
+
             loss.backward()
 
             # print loss every batch
@@ -146,12 +142,9 @@ def main():
             optimizer.step()
             total_loss += loss.item()
 
-
             # reconstruct audio from predicted tokens for monitoring
             if epoch % 1 == 0:
                 with torch.no_grad():
-                    # import ipdb
-                    # ipdb.set_trace()
                     # take argmax as predicted tokens for now (TODO)
                     pred_tokens = torch.argmax(logits, dim=-1)
                     # pred_tokens: list of [B, L] per quantizer
