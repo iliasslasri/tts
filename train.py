@@ -19,6 +19,11 @@ NUM_SAMPLES = 10e3
 BASE_DIR = "/home/iliass/tts/"
 SAMPLE_RATE = 24_000
 
+# RVQ
+N_BINS = 1024
+N_QUANTIZERS = 32
+BATCH_SZ = 2
+
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -47,7 +52,6 @@ def main():
                 import os
                 wav_path = wav_dir / f"{file_id}.wav"
                 wav_path = os.path.abspath(os.path.join(BASE_DIR, wav_path))
-                print(wav_path)
                 rows.append({"file_id": file_id, "text": english_normalizer(text), "path": str(wav_path)})
 
     df = pd.DataFrame(rows)
@@ -57,18 +61,16 @@ def main():
     print("Head of dataFrame \n")
     print(df.head())
     dataset = LJSpeechDataset(df, tokenizer, encodec_model, sample_rate=SAMPLE_RATE, num_samples=NUM_SAMPLES)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=BATCH_SZ, shuffle=True, collate_fn=collate_fn)
 
     # Model
     text_vocab_size = tokenizer.vocab_size
     text_embed_dim = 512
     text_num_layers = 6
-    encodec_codebook_size = 1024
-    encodec_num_quantizers = 32
 
     model = TTSModel(
         text_vocab_size, text_embed_dim, text_num_layers,
-        encodec_codebook_size, encodec_num_quantizers
+        N_BINS, N_QUANTIZERS
     )
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -87,7 +89,7 @@ def main():
 
             # compute cross-entropy for each quantizer
             loss = 0
-            for i in range(encodec_num_quantizers):
+            for i in range(N_BINS):
                 pred = logits[i].transpose(1, 2)  # [B, C, L_pred]
                 target = encodec_batch[i]         # [B, L_target]
 
