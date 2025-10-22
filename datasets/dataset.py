@@ -96,11 +96,19 @@ def collate_fn(batch):
     return token_ids_batch, encodec_batch
 
 def safe_load_wav(path, sample_rate=24000):
-    try:
-        wav, sr = torchaudio.load(path)
-        if sr != sample_rate:
-            wav = torchaudio.functional.resample(wav, sr, sample_rate)
-        return wav, sample_rate
-    except Exception as e:
-        print(f"[WARN] Skipping bad file: {path} ({e})")
-        return None, None
+    # try:
+    import soundfile as sf
+    wav, sr = sf.read(path)
+    wav = wav.astype('float32')
+
+    if wav.ndim == 1:
+        wav = torch.from_numpy(wav).unsqueeze(0)  # mono: [1, num_samples]
+    else:
+        wav = torch.from_numpy(wav.T)  # multi-channel: [channels, num_samples]
+    # wav, sr = torchaudio.load(path)
+    if sr != sample_rate:
+        wav = torchaudio.functional.resample(wav, sr, sample_rate)
+    return wav, sample_rate
+    # except Exception as e:
+    #     print(f"[WARN] Skipping bad file: {path} ({e})")
+    #     return None, None

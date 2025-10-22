@@ -91,7 +91,6 @@ class TTSModel(nn.Module):
             tgt=tgt_emb,
             memory=memory,
             tgt_mask=tgt_mask,
-            tgt_is_causal=True,
         )  # [B, L_audio, D]
         decoded = decoded.view(B, L, NQ, D)
         decoded = F.dropout(decoded, p=0.1, training=self.training)

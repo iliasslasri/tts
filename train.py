@@ -9,7 +9,6 @@ import torch.nn.functional as F
 import torchaudio
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchinfo import summary
 from transformers import WhisperTokenizer
 from whisper_normalizer.english import EnglishTextNormalizer
 
@@ -17,9 +16,10 @@ from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
 from pathlib import Path
+import soundfile as sf
 
 NUM_SAMPLES = 1
-N_EPOCHS = int(10e4)
+N_EPOCHS = int(10e5)
 BASE_DIR = Path(__file__).resolve().parent
 SAMPLE_RATE = 24_000
 
@@ -30,7 +30,7 @@ BATCH_SZ = 1
 
 def main():
     writer = SummaryWriter(log_dir=f"runs/tts_{int(time.time())}")
-    device = "cpu" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load tokenizer and EnCodec
     tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
@@ -88,8 +88,6 @@ def main():
     token_ids_example = token_ids_example.to(device)
     rvq_token_ids_example = rvq_token_ids_example.to(device)
 
-    summary(model, input_data=(token_ids_example, rvq_token_ids_example))
-
     print(model)
     print("Total params:", sum(p.numel() for p in model.parameters()))
     print("Trainable params:", sum(p.numel() for p in model.parameters() if p.requires_grad))
@@ -139,12 +137,12 @@ def main():
 
             # print loss every batch
             writer.add_scalar("Loss/train", loss.item(), global_step)
-
+            print("gloabl step", global_step, "loss=", loss.item())
             optimizer.step()
             total_loss += loss.item()
 
             # reconstruct audio from predicted tokens for monitoring
-            if epoch % 1 == 0:
+            if epoch % 100 == 0:
                 with torch.no_grad():
                     # take argmax as predicted tokens for now (TODO)
                     pred_tokens = torch.argmax(logits, dim=-1)
@@ -154,7 +152,7 @@ def main():
                     encoded_frames = [(pred_tokens_tensor, None)]
                     reconstructed = encodec_model.decode(encoded_frames)
                     # reconstructed: [B, 1, T]
-                    torchaudio.save(f"reconstructed_epoch{epoch}.wav", reconstructed[0].cpu(), SAMPLE_RATE)
+                    sf.write(f"reconstructed_epoch{epoch}.wav", reconstructed[0][0].cpu().numpy(), SAMPLE_RATE)
 
         print(f"Epoch {epoch} - Loss: {total_loss / len(dataloader)}")
     writer.close()
