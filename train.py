@@ -154,7 +154,10 @@ def main():
                     # reconstructed: [B, 1, T]
                     sf.write(f"reconstructed_epoch{epoch}.wav", reconstructed[0][0].cpu().numpy(), SAMPLE_RATE)
 
-        print(f"Epoch {epoch} - Loss: {total_loss / len(dataloader)}")
+                    gt_tokens = torch.stack(encodec_batch, dim=1)  # [B, N_Q, L]
+                    encoded_frames_gt = [(gt_tokens, None)]
+                    reconstructed_gt = encodec_model.decode(encoded_frames_gt)  # [B, 1, T]
+                    sf.write(f"original_epoch{epoch}.wav", reconstructed_gt[0][0].cpu().numpy(), SAMPLE_RATE)
     writer.close()
 if __name__ == "__main__":
     main()
