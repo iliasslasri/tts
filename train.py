@@ -17,8 +17,10 @@ from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
 from pathlib import Path
 import soundfile as sf
+from datetime import datetime
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
-NUM_SAMPLES = 1
+NUM_SAMPLES = 1024
 N_EPOCHS = int(10e5)
 BASE_DIR = Path(__file__).resolve().parent
 SAMPLE_RATE = 24_000
@@ -29,7 +31,12 @@ N_QUANTIZERS = 32
 BATCH_SZ = 1
 
 def main():
-    writer = SummaryWriter(log_dir=f"runs/tts_{int(time.time())}")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    writer = SummaryWriter(log_dir=f"runs/tts_{timestamp}")
+    checkpoint_dir = Path(f"runs/tts_{timestamp}/checkpoints")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load tokenizer and EnCodec
@@ -66,18 +73,23 @@ def main():
     print(df.head())
     dataset = LJSpeechDataset(df, tokenizer, encodec_model, sample_rate=SAMPLE_RATE, num_samples=NUM_SAMPLES)
     dataloader = DataLoader(dataset, batch_size=BATCH_SZ, shuffle=True, collate_fn=collate_fn)
-
+    
     # Model
     text_vocab_size = tokenizer.vocab_size
     text_embed_dim = 512
-    text_num_layers = 6
+    text_num_layers = 4
 
     model = TTSModel(
         text_vocab_size, text_embed_dim, text_num_layers,
-        N_BINS, N_QUANTIZERS, rvq_embed_dim=text_embed_dim
+        N_BINS, N_QUANTIZERS, rvq_embed_dim=text_embed_dim, 
+        num_decoder_layers=3, #6 worked in overfit
     )
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+    # lr tuning
+    scheduler = CosineAnnealingLR(optimizer, T_max=N_EPOCHS, eta_min=1e-6)
+
     print("-"*100)
     print("SUMMARY OF MODEL")
     print("-"*100)
@@ -93,7 +105,7 @@ def main():
     print("Trainable params:", sum(p.numel() for p in model.parameters() if p.requires_grad))
     print("-"*100)
     print("-"*100)
-
+    accumulation_steps = 32
     # Training loop
     for epoch in range(N_EPOCHS):
         model.train()
@@ -142,22 +154,31 @@ def main():
             total_loss += loss.item()
 
             # reconstruct audio from predicted tokens for monitoring
-            if epoch % 100 == 0:
+            if global_step % 5000 == 0:
                 with torch.no_grad():
                     # take argmax as predicted tokens for now (TODO)
                     pred_tokens = torch.argmax(logits, dim=-1)
                     # pred_tokens: list of [B, L] per quantizer
                     pred_list = [pred_tokens[..., i] for i in range(N_QUANTIZERS)]
-                    pred_tokens_tensor = torch.stack(pred_list, dim=1)
+                    pred_tokens_tensor = torch.stack(pred_list, dim=1).to('cpu')
                     encoded_frames = [(pred_tokens_tensor, None)]
-                    reconstructed = encodec_model.decode(encoded_frames)
+                    encodec_model_cpu = encodec_model.to('cpu')
+                    reconstructed = encodec_model_cpu.decode(encoded_frames)
                     # reconstructed: [B, 1, T]
-                    sf.write(f"reconstructed_epoch{epoch}.wav", reconstructed[0][0].cpu().numpy(), SAMPLE_RATE)
+                    sf.write(f"runs/tts_{timestamp}/reconstructed_epoch{epoch}.wav", reconstructed[0][0].cpu().numpy(), SAMPLE_RATE)
 
-                    gt_tokens = torch.stack(encodec_batch, dim=1)  # [B, N_Q, L]
+                    gt_tokens = torch.stack(encodec_batch, dim=1).to('cpu')  # [B, N_Q, L]
                     encoded_frames_gt = [(gt_tokens, None)]
-                    reconstructed_gt = encodec_model.decode(encoded_frames_gt)  # [B, 1, T]
-                    sf.write(f"original_epoch{epoch}.wav", reconstructed_gt[0][0].cpu().numpy(), SAMPLE_RATE)
+                    reconstructed_gt = encodec_model_cpu.decode(encoded_frames_gt)  # [B, 1, T]
+                    sf.write(f"runs/tts_{timestamp}/original_epoch{epoch}.wav", reconstructed_gt[0][0].cpu().numpy(), SAMPLE_RATE)
+
+                    torch.save(model.state_dict(), checkpoint_dir / f"model_epoch_{epoch}.pt")
+                    print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
+                    encodec_model.to(device)
+            del logits
+    final_model_path = checkpoint_dir / "model_final.pt"
+    torch.save(model.state_dict(), final_model_path)
+    print(f"[INFO] Final model saved to {final_model_path}")
     writer.close()
 if __name__ == "__main__":
     main()
