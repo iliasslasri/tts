@@ -144,13 +144,22 @@ def main():
             target_stack = target_stack[..., :min_len, :]
             target_onehot = F.one_hot(target_stack, num_classes=N_BINS).float()
             loss = F.cross_entropy(pred, target_onehot)
-
+            # Only update weights every accumulation_steps
+            # Scale the loss
+            loss = loss / accumulation_steps
             loss.backward()
-
+            del rvq_targets, rvq_token_ids
+            del pred, target_stack, target_onehot
             # print loss every batch
             writer.add_scalar("Loss/train", loss.item(), global_step)
+            writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
             print("gloabl step", global_step, "loss=", loss.item())
-            optimizer.step()
+            if (global_step + 1) % accumulation_steps == 0:
+                optimizer.step()
+                scheduler.step()     # if you use a scheduler
+                optimizer.zero_grad()
+            # optimizer.step()
+            # scheduler.step()
             total_loss += loss.item()
 
             # reconstruct audio from predicted tokens for monitoring
