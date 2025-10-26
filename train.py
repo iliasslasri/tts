@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import torchaudio
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import WhisperTokenizer
@@ -132,27 +131,27 @@ def main(cfg: DictConfig = None):
             pred = logits
             target = encodec_batch
 
-            # Ensure lengths match
+            # Ensure seq lengths match
             target_stack = torch.stack(target, dim=2) 
-            L_pred, L_target = pred.shape[1], target_stack.shape[-2]
-            min_len = min(L_pred, L_target)
+            min_len = min(pred.shape[1], target_stack.shape[-2])
             pred = pred[:, :min_len, :, :]
             target_stack = target_stack[..., :min_len, :]
-            target_onehot = F.one_hot(target_stack, num_classes=cfg.rvq.n_bins).float()
-            loss = F.cross_entropy(pred, target_onehot)
+            logits = pred.permute(0, 3, 1, 2) # [B, L, Q, N_BINS] -> [B, N_BINS, L, Q]
+            loss = F.cross_entropy(logits, target_stack)
+            
             # Only update weights every accumulation_steps
             # Scale the loss
             loss = loss / accumulation_steps
             loss.backward()
             del rvq_targets, rvq_token_ids
-            del pred, target_stack, target_onehot
+            del pred, target_stack
             # print loss every batch
             writer.add_scalar("Loss/train", loss.item(), global_step)
             writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
             print("gloabl step", global_step, "loss=", loss.item())
             if (global_step + 1) % accumulation_steps == 0:
                 optimizer.step()
-                scheduler.step()
+                # scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
             # optimizer.step()
             # scheduler.step()
