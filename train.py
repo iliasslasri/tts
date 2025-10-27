@@ -1,10 +1,14 @@
-# train.py
 import re
+from datetime import datetime
 from pathlib import Path
 
+import hydra
 import pandas as pd
+import soundfile as sf
 import torch
 import torch.nn.functional as F
+from omegaconf import DictConfig, OmegaConf
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import WhisperTokenizer
@@ -13,13 +17,6 @@ from whisper_normalizer.english import EnglishTextNormalizer
 from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
-from pathlib import Path
-import soundfile as sf
-from datetime import datetime
-from torch.optim.lr_scheduler import CosineAnnealingLR
-import hydra
-from omegaconf import DictConfig, OmegaConf
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
