@@ -1,0 +1,26 @@
+train:
+  num_samples: 1024
+  n_epochs: 1000000
+  batch_size: 1
+  accumulation_steps: 32
+  sample_rate: 24000
+  learning_rate: 0.0001
+  bos_token: 0
+
+model:
+  text_embed_dim: 512
+  text_num_layers: 2
+  num_decoder_layers: 2
+
+rvq:
+  n_bins: 1024
+  n_quantizers: 32
+
+dataset:
+  root_dir: "./datasets/cmu_us_awb_arctic"
+  wav_dir: "wav"
+  text_file: "etc/txt.done.data"
+
+logging:
+  log_dir: "runs"
+  save_every: 5000

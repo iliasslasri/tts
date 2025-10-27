@@ -1,20 +1,9 @@
-# TTS
+# TTS: WIP
+## Listen to last checkpoint's output [tts_mode_out.wav](https://github.com/iliasslasri/tts/blob/main/reconstructed_model.wav).
+## At this point, the generation of the tokens for the RVQ is done autoregressively one at a time, without any hierarchical autoregressive modeling, the tokens are then flattened to compute a MSE Loss. the next iteration will implement RQ-Transformer for hierarchical autoregressive modeling.
 
+Don't forget to pull the submodules:
 
-# TODO
-
-#### Papers:
-- [ ] EnCodec (Meta 2022) → discrete audio tokens, quantization, decoder.
-- [ ] VALL-E → Text-to-Speech as discrete token modeling (text → semantic tokens → codec tokens).
-
-#### Data:
-- [ ] Prepare paired (text, audio) dataset (LJSpeech, VCTK, or custom).
-- [ ] Resample all audio to 24kHz.
-- [ ] Normalize loudness, trim silence, split long recordings.
-- [ ] Clean and normalize text; optionally phonemize.
-- [ ] Split into train/validation/test sets.
-
-#### Models:
-- [ ] Prepare Encodec
-- [ ] Text Tokenization
-- [ ] Model Architecture with Encodec
+```bash
+git submodule update --init
+```
