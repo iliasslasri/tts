@@ -6,6 +6,7 @@ train:
   sample_rate: 24000
   learning_rate: 0.0001
   bos_token: 0
+  weight_decay: 1e-4
 
 model:
   text_embed_dim: 512
