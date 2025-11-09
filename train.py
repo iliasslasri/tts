@@ -105,7 +105,24 @@ def main(cfg: DictConfig = None):
     # lr tuning
     scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.n_epochs, eta_min=1e-6)
 
-    print("-" * 100)
+    # ----------------------------
+    # Load checkpoint if specified
+    # ----------------------------
+    if cfg.train.resume_from_checkpoint is not None:
+        checkpoint_path = Path(cfg.train.resume_from_checkpoint)
+        print(f"[INFO] Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            model.load_state_dict(checkpoint["model_state_dict"])
+            optimizer.load_state_dict(checkpoint.get("optimizer_state_dict", {}))
+            print(f"[INFO] Checkpoint loaded successfully (epoch {checkpoint.get('epoch', '?')})")
+        else:
+            # backward compatibility if only model weights were saved
+            model.load_state_dict(checkpoint)
+            print(f"[INFO] Model weights loaded successfully")
+
+    print("-"*100)
     print("SUMMARY OF MODEL")
     print("-" * 100)
     token_ids_example = torch.randint(
@@ -227,9 +244,13 @@ def main(cfg: DictConfig = None):
                         cfg.train.sample_rate,
                     )
 
-                    torch.save(
-                        model.state_dict(), checkpoint_dir / f"model_epoch_{epoch}.pt"
-                    )
+                    torch.save({
+                                "epoch": epoch,
+                                "model_state_dict": model.state_dict(),
+                                "optimizer_state_dict": optimizer.state_dict(),
+                                "scheduler_state_dict": scheduler.state_dict(),
+                                "loss": loss.item(),
+                                }, checkpoint_dir / f"model_epoch_{epoch}.pt")
                     print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
                     encodec_model.to(device)
             del logits, encodec_batch, token_ids

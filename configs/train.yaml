@@ -2,11 +2,12 @@ train:
   num_samples: 1024
   n_epochs: 1000000
   batch_size: 1
-  accumulation_steps: 32
+  accumulation_steps: 64
   sample_rate: 24000
   learning_rate: 0.0001
   bos_token: 0
   weight_decay: 1e-4
+  resume_from_checkpoint: "/home/infres/lasri-22/tts/outputs/2025-10-26/20-32-57/runs/tts_20251026_203257/checkpoints/model_epoch_200.pt"  # null or path to checkpoint
 
 model:
   text_embed_dim: 512
