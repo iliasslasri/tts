@@ -131,10 +131,10 @@ def main(cfg: DictConfig = None):
         num_decoder_layers=cfg.model.num_decoder_layers,
     )
     model.to(device)
-    optimizer = torch.optim.AdamW(
+    optimizer = torch.optim.Adam(
         model.parameters(),
         lr=cfg.train.learning_rate,
-        weight_decay=cfg.train.weight_decay,
+        # weight_decay=cfg.train.weight_decay,
     )
 
     # lr tuning
