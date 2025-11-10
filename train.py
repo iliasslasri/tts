@@ -1,3 +1,5 @@
+import math
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -8,7 +10,7 @@ import soundfile as sf
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig, OmegaConf
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import WhisperTokenizer
@@ -17,8 +19,43 @@ from whisper_normalizer.english import EnglishTextNormalizer
 from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
+from torch.optim import Optimizer
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# Taken from HF transformers
+def get_cosine_schedule_with_warmup(
+    optimizer: Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: float = 0.5, last_epoch: int = -1
+):
+    """
+    Create a schedule with a learning rate that decreases following the values of the cosine function between the
+    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
+    initial lr set in the optimizer.
+
+    Args:
+        optimizer (:class:`~torch.optim.Optimizer`):
+            The optimizer for which to schedule the learning rate.
+        num_warmup_steps (:obj:`int`):
+            The number of steps for the warmup phase.
+        num_training_steps (:obj:`int`):
+            The total number of training steps.
+        num_cycles (:obj:`float`, `optional`, defaults to 0.5):
+            The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
+            following a half-cosine).
+        last_epoch (:obj:`int`, `optional`, defaults to -1):
+            The index of the last epoch when resuming training.
+
+    Return:
+        :obj:`torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
+    """
+
+    def lr_lambda(current_step):
+        if current_step < num_warmup_steps:
+            return float(current_step) / float(max(1, num_warmup_steps))
+        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+
+    return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
 @hydra.main(config_path="configs", config_name="train")
@@ -52,8 +89,6 @@ def main(cfg: DictConfig = None):
             match = pattern.search(line)
             if match:
                 file_id, text = match.groups()
-                import os
-
                 wav_path = wav_dir / f"{file_id}.wav"
                 wav_path = os.path.abspath(os.path.join(BASE_DIR, wav_path))
                 rows.append(
@@ -103,26 +138,17 @@ def main(cfg: DictConfig = None):
     )
 
     # lr tuning
-    scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.n_epochs, eta_min=1e-6)
+    # scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.n_epochs, eta_min=1e-6)
+    effective_training_steps = (len(dataloader) * cfg.train.n_epochs) // cfg.train.accumulation_steps
+    num_warmup_steps = int(0.25 * effective_training_steps)
 
-    # ----------------------------
-    # Load checkpoint if specified
-    # ----------------------------
-    if cfg.train.resume_from_checkpoint is not None:
-        checkpoint_path = Path(cfg.train.resume_from_checkpoint)
-        print(f"[INFO] Loading checkpoint from {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=effective_training_steps,
+    )
 
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            model.load_state_dict(checkpoint["model_state_dict"])
-            optimizer.load_state_dict(checkpoint.get("optimizer_state_dict", {}))
-            print(f"[INFO] Checkpoint loaded successfully (epoch {checkpoint.get('epoch', '?')})")
-        else:
-            # backward compatibility if only model weights were saved
-            model.load_state_dict(checkpoint)
-            print(f"[INFO] Model weights loaded successfully")
-
-    print("-"*100)
+    print("-" * 100)
     print("SUMMARY OF MODEL")
     print("-" * 100)
     token_ids_example = torch.randint(
@@ -135,7 +161,6 @@ def main(cfg: DictConfig = None):
     # Move to device if needed
     token_ids_example = token_ids_example.to(device)
     rvq_token_ids_example = rvq_token_ids_example.to(device)
-    accumulation_steps = cfg.train.accumulation_steps
 
     print(model)
     print("Total params:", sum(p.numel() for p in model.parameters()))
@@ -195,7 +220,7 @@ def main(cfg: DictConfig = None):
 
             # Only update weights every accumulation_steps
             # Scale the loss
-            loss = loss / accumulation_steps
+            loss = loss / cfg.train.accumulation_steps
             loss.backward()
             del rvq_targets, rvq_token_ids
             del pred, target_stack
@@ -203,9 +228,9 @@ def main(cfg: DictConfig = None):
             writer.add_scalar("Loss/train", loss.item(), global_step)
             writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
             print("gloabl step", global_step, "loss=", loss.item())
-            if (global_step + 1) % accumulation_steps == 0:
+            if (global_step + 1) % cfg.train.accumulation_steps == 0:
                 optimizer.step()
-                # scheduler.step()
+                scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
             # optimizer.step()
             # scheduler.step()
@@ -244,13 +269,9 @@ def main(cfg: DictConfig = None):
                         cfg.train.sample_rate,
                     )
 
-                    torch.save({
-                                "epoch": epoch,
-                                "model_state_dict": model.state_dict(),
-                                "optimizer_state_dict": optimizer.state_dict(),
-                                "scheduler_state_dict": scheduler.state_dict(),
-                                "loss": loss.item(),
-                                }, checkpoint_dir / f"model_epoch_{epoch}.pt")
+                    torch.save(
+                        model.state_dict(), checkpoint_dir / f"model_epoch_{epoch}.pt"
+                    )
                     print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
                     encodec_model.to(device)
             del logits, encodec_batch, token_ids
