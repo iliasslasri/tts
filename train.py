@@ -168,6 +168,10 @@ def main(cfg: DictConfig = None):
         "Trainable params:",
         sum(p.numel() for p in model.parameters() if p.requires_grad),
     )
+    
+    encodec_params = sum(p.numel() for p in encodec_model.parameters())
+    print(f"Encodec parameters: {encodec_params:,}")
+    print(f"Whisper tokenizer vacab size: {text_vocab_size:,}")
     print("-" * 100)
     print("-" * 100)
     # Training loop
