@@ -148,6 +148,20 @@ def main(cfg: DictConfig = None):
         num_training_steps=effective_training_steps,
     )
 
+    # Loading checkpoint
+    if cfg.train.resume_from_checkpoint:
+        print("-" * 100)
+        print("Loading from checkpoint")
+        print("-" * 100)
+        # checkpoint = torch.load(cfg.train.resume_from_checkpoint, map_location=device)
+        # Load states
+        state_dict = torch.load(cfg.train.resume_from_checkpoint, map_location=device)
+        model.load_state_dict(state_dict)
+
+        # model.load_state_dict(checkpoint["model_state_dict"])
+        # optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        # scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
     print("-" * 100)
     print("SUMMARY OF MODEL")
     print("-" * 100)
@@ -273,15 +287,22 @@ def main(cfg: DictConfig = None):
                         cfg.train.sample_rate,
                     )
 
-                    torch.save(
-                        model.state_dict(), checkpoint_dir / f"model_epoch_{epoch}.pt"
-                    )
+                    torch.save({
+                                    "epoch": epoch,
+                                    "model_state_dict": model.state_dict(),
+                                    "optimizer_state_dict": optimizer.state_dict(),
+                                    "scheduler_state_dict": scheduler.state_dict(),
+                                }, checkpoint_dir / f"checkpoint_epoch_{epoch}.pt")
                     print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
                     encodec_model.to(device)
             del logits, encodec_batch, token_ids
-    final_model_path = checkpoint_dir / "model_final.pt"
-    torch.save(model.state_dict(), final_model_path)
-    print(f"[INFO] Final model saved to {final_model_path}")
+    torch.save({
+                "epoch": cfg.train.n_epochs,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+            }, checkpoint_dir / "checkpoint_final.pt")
+    print(f"[INFO] Final model saved to ", checkpoint_dir, "/checkpoint_final.pt")
     writer.close()
 
 

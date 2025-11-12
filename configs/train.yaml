@@ -7,7 +7,7 @@ train:
   learning_rate: 1e-4
   bos_token: 0
   weight_decay: 1e-6
-  resume_from_checkpoint: "/home/infres/lasri-22/tts/outputs/2025-10-26/20-32-57/runs/tts_20251026_203257/checkpoints/model_epoch_200.pt"  # null or path to checkpoint
+  resume_from_checkpoint: "/home/infres/lasri-22/tts/outputs/2025-11-10/14-13-02/runs/tts_20251110_141303/checkpoints/model_final.pt"  # null or path to checkpoint
 
 model:
   text_embed_dim: 512
