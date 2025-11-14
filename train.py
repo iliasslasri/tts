@@ -134,33 +134,30 @@ def main(cfg: DictConfig = None):
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=cfg.train.learning_rate,
-        # weight_decay=cfg.train.weight_decay,
     )
 
-    # lr tuning
-    # scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.n_epochs, eta_min=1e-6)
-    effective_training_steps = (len(dataloader) * cfg.train.n_epochs) // cfg.train.accumulation_steps
-    num_warmup_steps = int(0.25 * effective_training_steps)
-
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=num_warmup_steps,
-        num_training_steps=effective_training_steps,
-    )
+    if cfg.train.scheduler_on:
+        effective_training_steps = (len(dataloader) * cfg.train.n_epochs) // cfg.train.accumulation_steps
+        num_warmup_steps = int(0.25 * effective_training_steps)
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=effective_training_steps,
+        )
+    else:
+        scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.n_epochs, eta_min=1e-6)
 
     # Loading checkpoint
     if cfg.train.resume_from_checkpoint:
         print("-" * 100)
         print("Loading from checkpoint")
         print("-" * 100)
-        # checkpoint = torch.load(cfg.train.resume_from_checkpoint, map_location=device)
+        checkpoint = torch.load(cfg.train.resume_from_checkpoint, map_location=device)
         # Load states
-        state_dict = torch.load(cfg.train.resume_from_checkpoint, map_location=device)
-        model.load_state_dict(state_dict)
-
-        # model.load_state_dict(checkpoint["model_state_dict"])
-        # optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        # scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if cfg.train.scheduler_on:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
     print("-" * 100)
     print("SUMMARY OF MODEL")
@@ -248,10 +245,10 @@ def main(cfg: DictConfig = None):
             print("gloabl step", global_step, "loss=", loss.item())
             if (global_step + 1) % cfg.train.accumulation_steps == 0:
                 optimizer.step()
-                scheduler.step()
+                if cfg.train.scheduler_on:
+                    scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
-            # optimizer.step()
-            # scheduler.step()
+
             total_loss += loss.item()
 
             # reconstruct audio from predicted tokens for monitoring
