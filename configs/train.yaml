@@ -7,7 +7,7 @@ train:
   learning_rate: 9e-5
   bos_token: 0
   weight_decay: 1e-6
-  resume_from_checkpoint: "/home/infres/lasri-22/tts/outputs/2025-11-12/18-29-14/runs/tts_20251112_182914/checkpoints/checkpoint_final.pt"  # null or path to checkpoint
+  resume_from_checkpoint: ${env:CKPT, null}  # null or path to checkpoint
   scheduler_on: False
 
 model:

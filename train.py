@@ -150,7 +150,7 @@ def main(cfg: DictConfig = None):
     # Loading checkpoint
     if cfg.train.resume_from_checkpoint:
         print("-" * 100)
-        print("Loading from checkpoint")
+        print(f"Loading from checkpoint {cfg.train.resume_from_checkpoint}")
         print("-" * 100)
         checkpoint = torch.load(cfg.train.resume_from_checkpoint, map_location=device)
         # Load states
