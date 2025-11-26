@@ -129,6 +129,7 @@ def main(cfg: DictConfig = None):
         encodec_num_quantizers=cfg.rvq.n_quantizers,
         rvq_embed_dim=cfg.model.text_embed_dim,
         num_decoder_layers=cfg.model.num_decoder_layers,
+        rq_transformer=True,
     )
     model.to(device)
     optimizer = torch.optim.Adam(
@@ -242,8 +243,8 @@ def main(cfg: DictConfig = None):
             # print loss every batch
             writer.add_scalar("Loss/train", loss.item(), global_step)
             writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
-            print("gloabl step", global_step, "loss=", loss.item())
             if (global_step + 1) % cfg.train.accumulation_steps == 0:
+                print("gloabl step", global_step, "loss=", loss.item())
                 optimizer.step()
                 if cfg.train.scheduler_on:
                     scheduler.step()
