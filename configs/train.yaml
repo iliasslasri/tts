@@ -7,7 +7,7 @@ train:
   learning_rate: 9e-5
   bos_token: 0
   weight_decay: 1e-6
-  resume_from_checkpoint: ${env:CKPT, null}  # null or path to checkpoint
+  resume_from_checkpoint: null
   scheduler_on: False
 
 model:
