@@ -62,7 +62,8 @@ def get_cosine_schedule_with_warmup(
 def main(cfg: DictConfig = None):
     print(OmegaConf.to_yaml(cfg))
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
+    if cfg.name:
+        timestamp += f"_{cfg.name}"
     writer = SummaryWriter(log_dir=f"{cfg.logging.log_dir}/tts_{timestamp}")
     checkpoint_dir = Path(f"{cfg.logging.log_dir}/tts_{timestamp}/checkpoints")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -129,7 +130,7 @@ def main(cfg: DictConfig = None):
         encodec_num_quantizers=cfg.rvq.n_quantizers,
         rvq_embed_dim=cfg.model.text_embed_dim,
         num_decoder_layers=cfg.model.num_decoder_layers,
-        rq_transformer=True,
+        rq_transformer=cfg.model.rq_transformer,
     )
     model.to(device)
     optimizer = torch.optim.Adam(
@@ -138,12 +139,13 @@ def main(cfg: DictConfig = None):
     )
 
     if cfg.train.scheduler_on:
-        effective_training_steps = (len(dataloader) * cfg.train.n_epochs) // cfg.train.accumulation_steps
-        num_warmup_steps = int(0.25 * effective_training_steps)
+        effective_training_steps = len(dataloader) * cfg.train.n_epochs
+        num_warmup_steps = 0 # int(0.25 * effective_training_steps)
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
             num_warmup_steps=num_warmup_steps,
             num_training_steps=effective_training_steps,
+            num_cycles=cfg.train.num_cycles,
         )
     else:
         scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.n_epochs, eta_min=1e-6)
@@ -158,7 +160,11 @@ def main(cfg: DictConfig = None):
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         if cfg.train.scheduler_on:
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            if "scheduler_state_dict" in checkpoint:
+                try:
+                    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                except KeyError:
+                    print("[WARNING] Scheduler type mismatch. Starting scheduler fresh.")
 
     print("-" * 100)
     print("SUMMARY OF MODEL")
@@ -186,9 +192,12 @@ def main(cfg: DictConfig = None):
     print(f"Whisper tokenizer vacab size: {text_vocab_size:,}")
     print("-" * 100)
     print("-" * 100)
+    loss_fn = torch.nn.CrossEntropyLoss()
     # Training loop
+    model.train()
     for epoch in range(cfg.train.n_epochs):
-        model.train()
+        if epoch > cfg.train.n_epochs * 0.25 and cfg.train.scheduler_on:
+            scheduler.step()
         total_loss = 0
         batch_idx = 0
         for token_ids, encodec_batch in dataloader:
@@ -220,34 +229,30 @@ def main(cfg: DictConfig = None):
 
             logits = model(
                 token_ids, rvq_token_ids
-            )  # list of [B, L, codebook_size] per quantizer
+            )  # [B, L, N_QUANTIZERS, codebook_size]
 
             # compute cross-entropy for each quantizer
-            pred = logits
             target = encodec_batch
-
             # Ensure seq lengths match
             target_stack = torch.stack(target, dim=2)
-            min_len = min(pred.shape[1], target_stack.shape[-2])
-            pred = pred[:, :min_len, :, :]
-            target_stack = target_stack[..., :min_len, :]
-            logits = pred.permute(0, 3, 1, 2)  # [B, L, Q, N_BINS] -> [B, N_BINS, L, Q]
-            loss = F.cross_entropy(logits, target_stack)
+            assert (
+                logits.shape[1] == target_stack.shape[1]
+            ), f"logits and target sequence length mismatch: {logits.shape[1]} vs {target_stack.shape[1]}"
+            logits = logits.permute(0, 3, 1, 2)  # [B, codebook_size, L, N_QUANTIZERS]
+            loss = loss_fn(logits, target_stack)
 
             # Only update weights every accumulation_steps
             # Scale the loss
             loss = loss / cfg.train.accumulation_steps
             loss.backward()
             del rvq_targets, rvq_token_ids
-            del pred, target_stack
+            del target_stack
             # print loss every batch
             writer.add_scalar("Loss/train", loss.item(), global_step)
             writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
             if (global_step + 1) % cfg.train.accumulation_steps == 0:
                 print("gloabl step", global_step, "loss=", loss.item())
                 optimizer.step()
-                if cfg.train.scheduler_on:
-                    scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
 
             total_loss += loss.item()
@@ -256,12 +261,11 @@ def main(cfg: DictConfig = None):
             if global_step % cfg.logging.save_every == 0:
                 with torch.no_grad():
                     # take argmax as predicted tokens for now (TODO)
-                    pred_tokens = torch.argmax(logits, dim=-1)
-                    # pred_tokens: list of [B, L] per quantizer
-                    pred_list = [
-                        pred_tokens[..., i] for i in range(cfg.rvq.n_quantizers)
-                    ]
-                    pred_tokens_tensor = torch.stack(pred_list, dim=1).to("cpu")
+                    pred_tokens = torch.argmax(logits, dim=1)
+                    # pred_tokens: [B, L, N_QUANTIZERS]
+                    pred_tokens = pred_tokens.permute(0, 2, 1)  # [B, N_QUANTIZERS, L]
+                    # Decode using EnCodec
+                    pred_tokens_tensor = pred_tokens.to("cpu")  # [B, N_QUANTIZERS, L]
                     encoded_frames = [(pred_tokens_tensor, None)]
                     encodec_model_cpu = encodec_model.to("cpu")
                     reconstructed = encodec_model_cpu.decode(encoded_frames)
@@ -293,6 +297,7 @@ def main(cfg: DictConfig = None):
                                 }, checkpoint_dir / f"checkpoint_epoch_{epoch}.pt")
                     print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
                     encodec_model.to(device)
+            writer.add_scalar("Loss/epoch", total_loss, epoch)
             del logits, encodec_batch, token_ids
     torch.save({
                 "epoch": cfg.train.n_epochs,
