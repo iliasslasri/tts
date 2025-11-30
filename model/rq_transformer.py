@@ -1,25 +1,36 @@
-import torch
 from copy import deepcopy
+
+import torch
+
 
 class RQTransformerDecoder(torch.nn.Module):
     def __init__(self, decoder_layer, num_layers, encodec_num_quantizers):
         super().__init__()
         self.temporal_decoder = torch.nn.ModuleList(
-            [deepcopy(decoder_layer) for _ in range(num_layers//2)]
+            [deepcopy(decoder_layer) for _ in range(num_layers // 2)]
         )
         self.num_layers = num_layers
         self.depth_decoder = torch.nn.ModuleList(
-            [deepcopy(decoder_layer) for _ in range(num_layers//2)]
+            [deepcopy(decoder_layer) for _ in range(num_layers // 2)]
         )
         self.encodec_num_quantizers = encodec_num_quantizers
 
-    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
-                tgt_key_padding_mask=None, memory_key_padding_mask=None):
+    def forward(
+        self,
+        tgt,
+        memory,
+        tgt_mask=None,
+        memory_mask=None,
+        tgt_key_padding_mask=None,
+        memory_key_padding_mask=None,
+    ):
         batch_size, seq_len, _ = tgt.size()
-        # wheighed sum on the sequence length dimension of memory
-        tgt = tgt.view(batch_size, seq_len//self.encodec_num_quantizers, self.encodec_num_quantizers, -1)  # [B, L, NQ, D]
-        tgt = tgt.mean(dim=2, keepdim=True).squeeze(2) # [B, L, D]
-        
+        # weighed sum on the sequence length dimension of memory
+        tgt = tgt.view(
+            batch_size, seq_len // self.encodec_num_quantizers, self.encodec_num_quantizers, -1
+        )  # [B, L, NQ, D]
+        tgt = tgt.mean(dim=2, keepdim=True).squeeze(2)  # [B, L, D]
+
         # Temporal decoding
         zs = tgt
         L = tgt.size(1)
@@ -53,7 +64,7 @@ class RQTransformerDecoder(torch.nn.Module):
             rqv_memory = out
             outputs.append(out)
         # Concatenate outputs along the feature dimension
-        final_output = torch.cat(outputs, dim=1)  # [B, L*NQ, D]  
+        final_output = torch.cat(outputs, dim=1)  # [B, L*NQ, D]
         return final_output
 
 
@@ -66,12 +77,13 @@ if __name__ == "__main__":
     num_layers = 4
 
     decoder_layer = torch.nn.TransformerDecoderLayer(d_model=d_model, nhead=1, batch_first=True)
-    rq_transformer = RQTransformerDecoder(decoder_layer, num_layers=num_layers, encodec_num_quantizers=NQ)
+    rq_transformer = RQTransformerDecoder(
+        decoder_layer, num_layers=num_layers, encodec_num_quantizers=NQ
+    )
 
     tgt = torch.randn(batch_size, seq_len, NQ, d_model)
-    memory_mask = torch.tril(torch.ones(seq_len, seq_len)) == 1 
+    memory_mask = torch.tril(torch.ones(seq_len, seq_len)) == 1
     memory = torch.randn(batch_size, seq_len, d_model)
 
     out = rq_transformer(tgt, memory)
     print("Output shape:", out.shape)  # Expected: [batch_size, seq_len, NQ, d_model]
-    import ipdb; ipdb.set_trace()

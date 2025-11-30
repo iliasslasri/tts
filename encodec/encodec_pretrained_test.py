@@ -32,6 +32,6 @@ from torchviz import make_dot
 x = torch.randn(1, 1, 24000)
 frames = model(wav)
 print(frames.shape)
-import ipdb; ipdb.set_trace()
-# import ipdb; ipdb.set_trace()
-make_dot(encoded_frames, params=dict(model.named_parameters())).render("encodec_graph", format="pdf")
+make_dot(encoded_frames, params=dict(model.named_parameters())).render(
+    "encodec_graph", format="pdf"
+)

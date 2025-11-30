@@ -10,6 +10,7 @@ import soundfile as sf
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig, OmegaConf
+from torch.optim import Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -19,40 +20,45 @@ from whisper_normalizer.english import EnglishTextNormalizer
 from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
-from torch.optim import Optimizer
 
 BASE_DIR = Path(__file__).resolve().parent
 
+
 # Taken from HF transformers
 def get_cosine_schedule_with_warmup(
-    optimizer: Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: float = 0.5, last_epoch: int = -1
+    optimizer: Optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    num_cycles: float = 0.5,
+    last_epoch: int = -1,
 ):
-    """
-    Create a schedule with a learning rate that decreases following the values of the cosine function between the
-    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
-    initial lr set in the optimizer.
+    """Create a schedule with a learning rate that decreases following the values of the cosine
+    function between the initial lr set in the optimizer to 0, after a warmup period during which
+    it increases linearly between 0 and the initial lr set in the optimizer.
 
     Args:
-        optimizer (:class:`~torch.optim.Optimizer`):
+        optimizer (torch.optim.Optimizer):
             The optimizer for which to schedule the learning rate.
-        num_warmup_steps (:obj:`int`):
+        num_warmup_steps (int):
             The number of steps for the warmup phase.
-        num_training_steps (:obj:`int`):
+        num_training_steps (int):
             The total number of training steps.
-        num_cycles (:obj:`float`, `optional`, defaults to 0.5):
+        num_cycles (float, `optional`, defaults to 0.5):
             The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
             following a half-cosine).
-        last_epoch (:obj:`int`, `optional`, defaults to -1):
+        last_epoch (int, `optional`, defaults to -1):
             The index of the last epoch when resuming training.
 
     Return:
-        :obj:`torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
+        torch.optim.lr_scheduler.LambdaLR with the appropriate schedule.
     """
 
     def lr_lambda(current_step):
         if current_step < num_warmup_steps:
             return float(current_step) / float(max(1, num_warmup_steps))
-        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+        progress = float(current_step - num_warmup_steps) / float(
+            max(1, num_training_steps - num_warmup_steps)
+        )
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
@@ -71,7 +77,7 @@ def main(cfg: DictConfig = None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load tokenizer and EnCodec
-    tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
+    tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")  # nosec
     tokenizer.set_prefix_tokens(language="en", task="transcribe")
     encodec_model = EncodecModel.encodec_model_24khz()
     encodec_model.to(device)
@@ -85,7 +91,7 @@ def main(cfg: DictConfig = None):
     rows = []
     english_normalizer = EnglishTextNormalizer()
 
-    with open(text_file, "r") as f:
+    with open(text_file) as f:
         for line in f:
             match = pattern.search(line)
             if match:
@@ -103,9 +109,7 @@ def main(cfg: DictConfig = None):
     df = pd.DataFrame(rows)
     print(f"All audio files: {len(df)}")
     df = df[df["path"].apply(os.path.exists)].reset_index(drop=True)
-    print(
-        f"Valid audio files: {len(df)} remaining, after filtering with os.path.exists"
-    )
+    print(f"Valid audio files: {len(df)} remaining, after filtering with os.path.exists")
     print("Head of dataFrame \n")
     print(df.head())
     dataset = LJSpeechDataset(
@@ -140,7 +144,7 @@ def main(cfg: DictConfig = None):
 
     if cfg.train.scheduler_on:
         effective_training_steps = len(dataloader) * cfg.train.n_epochs
-        num_warmup_steps = 0 # int(0.25 * effective_training_steps)
+        num_warmup_steps = 0  # int(0.25 * effective_training_steps)
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
             num_warmup_steps=num_warmup_steps,
@@ -155,7 +159,7 @@ def main(cfg: DictConfig = None):
         print("-" * 100)
         print(f"Loading from checkpoint {cfg.train.resume_from_checkpoint}")
         print("-" * 100)
-        checkpoint = torch.load(cfg.train.resume_from_checkpoint, map_location=device)
+        checkpoint = torch.load(cfg.train.resume_from_checkpoint, map_location=device)  # nosec
         # Load states
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -169,9 +173,7 @@ def main(cfg: DictConfig = None):
     print("-" * 100)
     print("SUMMARY OF MODEL")
     print("-" * 100)
-    token_ids_example = torch.randint(
-        0, tokenizer.vocab_size, (1, 11), dtype=torch.long
-    )
+    token_ids_example = torch.randint(0, tokenizer.vocab_size, (1, 11), dtype=torch.long)
     rvq_token_ids_example = torch.randint(
         0, cfg.rvq.n_bins, (1, 300, cfg.rvq.n_quantizers), dtype=torch.long
     )
@@ -186,7 +188,7 @@ def main(cfg: DictConfig = None):
         "Trainable params:",
         sum(p.numel() for p in model.parameters() if p.requires_grad),
     )
-    
+
     encodec_params = sum(p.numel() for p in encodec_model.parameters())
     print(f"Encodec parameters: {encodec_params:,}")
     print(f"Whisper tokenizer vacab size: {text_vocab_size:,}")
@@ -198,7 +200,7 @@ def main(cfg: DictConfig = None):
     for epoch in range(cfg.train.n_epochs):
         if epoch > cfg.train.n_epochs * 0.25 and cfg.train.scheduler_on:
             scheduler.step()
-            writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
+            writer.add_scalar("LR", scheduler.get_last_lr()[0], epoch * len(dataloader))
         total_loss = 0
         batch_idx = 0
         for token_ids, encodec_batch in dataloader:
@@ -208,9 +210,7 @@ def main(cfg: DictConfig = None):
             encodec_batch = [q.to(device) for q in encodec_batch]
 
             optimizer.zero_grad()
-            assert (
-                token_ids.max() < tokenizer.vocab_size
-            ), "Token ID exceeds vocab size!"
+            assert token_ids.max() < tokenizer.vocab_size, "Token ID exceeds vocab size!"
             # encodec_batch: list of [B, L] per quantizer, length = N_QUANTIZERS
             # Stack along last dimension: [B, L, N_QUANTIZERS]
             rvq_targets = torch.stack(encodec_batch, dim=-1)  # [B, L, N_QUANTIZERS]
@@ -228,9 +228,7 @@ def main(cfg: DictConfig = None):
                 [rvq_input, rvq_targets[:, :-1, :]], dim=1
             )  # [B, L, N_QUANTIZERS]
 
-            logits = model(
-                token_ids, rvq_token_ids
-            )  # [B, L, N_QUANTIZERS, codebook_size]
+            logits = model(token_ids, rvq_token_ids)  # [B, L, N_QUANTIZERS, codebook_size]
 
             # compute cross-entropy for each quantizer
             target = encodec_batch
@@ -251,7 +249,7 @@ def main(cfg: DictConfig = None):
             # print loss every batch
             writer.add_scalar("Loss/train", loss.item(), global_step)
             if (global_step + 1) % cfg.train.accumulation_steps == 0:
-                print("gloabl step", global_step, "loss=", loss.item())
+                print("global step", global_step, "loss=", loss.item())
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
 
@@ -276,36 +274,38 @@ def main(cfg: DictConfig = None):
                         cfg.train.sample_rate,
                     )
 
-                    gt_tokens = torch.stack(encodec_batch, dim=1).to(
-                        "cpu"
-                    )  # [B, N_Q, L]
+                    gt_tokens = torch.stack(encodec_batch, dim=1).to("cpu")  # [B, N_Q, L]
                     encoded_frames_gt = [(gt_tokens, None)]
-                    reconstructed_gt = encodec_model_cpu.decode(
-                        encoded_frames_gt
-                    )  # [B, 1, T]
+                    reconstructed_gt = encodec_model_cpu.decode(encoded_frames_gt)  # [B, 1, T]
                     sf.write(
                         f"runs/tts_{timestamp}/original_epoch{epoch}.wav",
                         reconstructed_gt[0][0].cpu().numpy(),
                         cfg.train.sample_rate,
                     )
 
-                    torch.save({
-                                    "epoch": epoch,
-                                    "model_state_dict": model.state_dict(),
-                                    "optimizer_state_dict": optimizer.state_dict(),
-                                    "scheduler_state_dict": scheduler.state_dict(),
-                                }, checkpoint_dir / f"checkpoint_epoch_{epoch}.pt")
+                    torch.save(
+                        {
+                            "epoch": epoch,
+                            "model_state_dict": model.state_dict(),
+                            "optimizer_state_dict": optimizer.state_dict(),
+                            "scheduler_state_dict": scheduler.state_dict(),
+                        },
+                        checkpoint_dir / f"checkpoint_epoch_{epoch}.pt",
+                    )
                     print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
                     encodec_model.to(device)
             writer.add_scalar("Loss/epoch", total_loss, epoch)
             del logits, encodec_batch, token_ids
-    torch.save({
-                "epoch": cfg.train.n_epochs,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-            }, checkpoint_dir / "checkpoint_final.pt")
-    print(f"[INFO] Final model saved to ", checkpoint_dir, "/checkpoint_final.pt")
+    torch.save(
+        {
+            "epoch": cfg.train.n_epochs,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+        },
+        checkpoint_dir / "checkpoint_final.pt",
+    )
+    print(f"[INFO] Final model saved to {checkpoint_dir}/checkpoint_final.pt")
     writer.close()
 
 

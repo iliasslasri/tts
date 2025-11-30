@@ -4,8 +4,8 @@ from transformers import WhisperTokenizer
 
 
 class TextTokenizer:
-    """
-    Tokenizer wrapper for TTS.
+    """Tokenizer wrapper for TTS.
+
     Can use:
         - 'char' mode (original)
         - 'whisper' mode (BPE from OpenAI Whisper)
@@ -17,7 +17,7 @@ class TextTokenizer:
 
         if self.mode == "whisper":
             # load pretrained Whisper tokenizer
-            self.tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
+            self.tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")  # nosec
         else:
             self.vocab = {}
             self.inv_vocab = {}
@@ -40,6 +40,7 @@ class TextTokenizer:
         if self.mode != "char":
             raise NotImplementedError("save_vocab only works in char mode")
         import json
+
         with open(path, "w") as f:
             json.dump(self.vocab, f, ensure_ascii=False, indent=2)
 
@@ -47,7 +48,8 @@ class TextTokenizer:
         if self.mode != "char":
             raise NotImplementedError("load_vocab only works in char mode")
         import json
-        with open(path, "r") as f:
+
+        with open(path) as f:
             self.vocab = json.load(f)
         self.inv_vocab = {i: s for s, i in self.vocab.items()}
 

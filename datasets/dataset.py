@@ -21,7 +21,7 @@ class LJSpeechDataset(Dataset):
         self.num_samples = num_samples
         for i in range(len(dataset)):
             text = dataset.loc[i, "text"]
-            audio_path = dataset.loc[i,"path"]
+            audio_path = dataset.loc[i, "path"]
             self.samples.append((text, audio_path))
             if i + 1 >= num_samples:
                 break
@@ -31,7 +31,7 @@ class LJSpeechDataset(Dataset):
 
     def __getitem__(self, idx):
         text, file_path = self.samples[idx]
-        
+
         # Tokenize text
         token_ids = self.tokenizer.encode(text, add_special_tokens=False)
         token_ids = torch.tensor(token_ids, dtype=torch.long)
@@ -39,7 +39,7 @@ class LJSpeechDataset(Dataset):
         # Load audio
         wav, sr = safe_load_wav(file_path)
         if wav is None:
-            return self.__getitem__(idx+1)
+            return self.__getitem__(idx + 1)
         if sr != self.sample_rate:
             wav = torchaudio.functional.resample(wav, sr, self.sample_rate)
         wav = wav.mean(0, keepdim=True)  # convert to mono if stereo with mean of all channels
@@ -48,10 +48,11 @@ class LJSpeechDataset(Dataset):
         device = next(self.encodec.parameters()).device
         wav = wav.unsqueeze(1).to(device)
         with torch.no_grad():
-            encodec_out = self.encodec.encode(wav)  
+            encodec_out = self.encodec.encode(wav)
             # encodec_out: list of [B, seq_len] per quantizer
         return token_ids, encodec_out
-    
+
+
 # ------------------------
 # Utils
 # ------------------------
@@ -73,13 +74,11 @@ def collate_fn(batch):
     max_len = max(token_ids_lens)
     token_ids_batch = torch.zeros(len(batch), max_len, dtype=torch.long)
     for i, x in enumerate(token_ids_list):
-        token_ids_batch[i, :len(x)] = x
+        token_ids_batch[i, : len(x)] = x
 
     # pad encodec per quantizer
     num_quantizers = encodec_list[0][0][0].shape[1]
     encodec_batch = []
-    # import ipdb
-    # ipdb.set_trace()
     for q in range(num_quantizers):
         # Extract the q-th quantizer sequence for each sample
         seqs = [e[0][0][0][q].cpu() for e in encodec_list]  # shape: [seq_len]
@@ -89,17 +88,19 @@ def collate_fn(batch):
         # Pad each sequence to max length
         padded = torch.zeros(len(seqs), max_seq, dtype=torch.long)
         for i, s in enumerate(seqs):
-            padded[i, :len(s)] = s
+            padded[i, : len(s)] = s
 
         encodec_batch.append(padded)
-    
+
     return token_ids_batch, encodec_batch
+
 
 def safe_load_wav(path, sample_rate=24000):
     # try:
     import soundfile as sf
+
     wav, sr = sf.read(path)
-    wav = wav.astype('float32')
+    wav = wav.astype("float32")
 
     if wav.ndim == 1:
         wav = torch.from_numpy(wav).unsqueeze(0)  # mono: [1, num_samples]

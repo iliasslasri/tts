@@ -1,19 +1,23 @@
+name: rq_transformer_1
+
 train:
   num_samples: 1024
-  n_epochs: 100
+  n_epochs: 300
   batch_size: 1
-  accumulation_steps: 128
+  accumulation_steps: 256
   sample_rate: 24000
   learning_rate: 9e-5
   bos_token: 0
   weight_decay: 1e-6
   resume_from_checkpoint: null
-  scheduler_on: False
+  scheduler_on: True
+  num_cycles: 0.25 # cosine scheduler
 
 model:
   text_embed_dim: 512
   text_num_layers: 2
   num_decoder_layers: 2
+  rq_transformer: False
 
 rvq:
   n_bins: 1024

@@ -6,9 +6,18 @@ from text_bone.text_encoder import TextEncoder
 
 
 class TTSModel(nn.Module):
-    def __init__(self, text_vocab_size, text_embed_dim, text_num_layers,
-                 encodec_codebook_size, encodec_num_quantizers, rvq_embed_dim=None,
-                 num_decoder_layers=1, num_heads=1, rq_transformer=False):
+    def __init__(
+        self,
+        text_vocab_size,
+        text_embed_dim,
+        text_num_layers,
+        encodec_codebook_size,
+        encodec_num_quantizers,
+        rvq_embed_dim=None,
+        num_decoder_layers=1,
+        num_heads=1,
+        rq_transformer=False,
+    ):
         """
         Args:
             text_vocab_size: size of text tokenizer
@@ -21,14 +30,12 @@ class TTSModel(nn.Module):
             num_heads: number of attention heads
         """
         super().__init__()
-        
+
         # -------------------
         # Text backbone
         # -------------------
         self.text_bone = TextEncoder(
-            vocab_size=text_vocab_size,
-            embed_dim=text_embed_dim,
-            num_layers=text_num_layers
+            vocab_size=text_vocab_size, embed_dim=text_embed_dim, num_layers=text_num_layers
         )
 
         # Project encoder output to match decoder embedding space
@@ -44,13 +51,14 @@ class TTSModel(nn.Module):
             nhead=num_heads,
             dim_feedforward=4 * rvq_embed_dim,
             dropout=0.1,
-            activation='gelu',
+            activation="gelu",
             batch_first=True,
         )
         self.rq_transformer = rq_transformer
         if rq_transformer:
             # Use a recurrent transformer decoder for RVQ
             from model.rq_transformer import RQTransformerDecoder
+
             self.decoder = RQTransformerDecoder(
                 decoder_layer,
                 num_layers=num_decoder_layers,
@@ -66,7 +74,6 @@ class TTSModel(nn.Module):
         # Prediction heads for each quantizer
         # -------------------
         self.quantize = nn.Linear(rvq_embed_dim, encodec_codebook_size)
-        
 
     def forward(self, token_ids, rvq_token_ids):
         """
@@ -85,10 +92,12 @@ class TTSModel(nn.Module):
         # Flattening to 3D for the decoder
         B, L, NQ, D = tgt_emb.shape
         tgt_emb = tgt_emb.view(B, L * NQ, D)  # [B, L*NQ, D]
-        
+
         # Generate causal mask
         tgt_len = tgt_emb.size(1)
-        tgt_mask = torch.triu(torch.ones(tgt_len, tgt_len, device=rvq_token_ids.device) * float('-inf'), diagonal=1)
+        tgt_mask = torch.triu(
+            torch.ones(tgt_len, tgt_len, device=rvq_token_ids.device) * float("-inf"), diagonal=1
+        )
 
         # Decoder
         decoded = self.decoder(
