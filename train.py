@@ -198,6 +198,7 @@ def main(cfg: DictConfig = None):
     for epoch in range(cfg.train.n_epochs):
         if epoch > cfg.train.n_epochs * 0.25 and cfg.train.scheduler_on:
             scheduler.step()
+            writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
         total_loss = 0
         batch_idx = 0
         for token_ids, encodec_batch in dataloader:
@@ -249,7 +250,6 @@ def main(cfg: DictConfig = None):
             del target_stack
             # print loss every batch
             writer.add_scalar("Loss/train", loss.item(), global_step)
-            writer.add_scalar("LR", scheduler.get_last_lr()[0], global_step)
             if (global_step + 1) % cfg.train.accumulation_steps == 0:
                 print("gloabl step", global_step, "loss=", loss.item())
                 optimizer.step()
