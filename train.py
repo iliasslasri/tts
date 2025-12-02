@@ -293,7 +293,8 @@ def main(cfg: DictConfig = None):
                     )
                     print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
                     encodec_model.to(device)
-            writer.add_scalar("Loss/epoch", total_loss, epoch)
+            avg_epoch_loss = total_loss / len(dataloader)
+            writer.add_scalar("Loss/epoch", avg_epoch_loss, epoch)
             del logits, encodec_batch, token_ids
     torch.save(
         {
