@@ -238,22 +238,21 @@ def main(cfg: DictConfig = None):
                 logits.shape[1] == target_stack.shape[1]
             ), f"logits and target sequence length mismatch: {logits.shape[1]} vs {target_stack.shape[1]}"
             logits = logits.permute(0, 3, 1, 2)  # [B, codebook_size, L, N_QUANTIZERS]
-            loss = loss_fn(logits, target_stack)
+            raw_loss = loss_fn(logits, target_stack)
 
             # Only update weights every accumulation_steps
             # Scale the loss
-            loss = loss / cfg.train.accumulation_steps
+            loss = raw_loss / cfg.train.accumulation_steps
             loss.backward()
             del rvq_targets, rvq_token_ids
             del target_stack
-            # print loss every batch
-            writer.add_scalar("Loss/train", loss.item(), global_step)
+            # log loss every batch
+            writer.add_scalar("Loss/step", raw_loss.item(), global_step)
             if (global_step + 1) % cfg.train.accumulation_steps == 0:
-                print("global step", global_step, "loss=", loss.item())
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
 
-            total_loss += loss.item()
+            total_loss += raw_loss.item()
 
             # reconstruct audio from predicted tokens for monitoring
             if global_step % cfg.logging.save_every == 0:
