@@ -68,6 +68,11 @@ def get_cosine_schedule_with_warmup(
 def main(cfg: DictConfig = None):
     print(OmegaConf.to_yaml(cfg))
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    accumulation_steps = min(
+        cfg.train.accumulation_steps, int(cfg.train.num_samples / cfg.train.batch_size / 10)
+    )  # at least 10 optimizer steps per epoch
+
     if cfg.name:
         timestamp += f"_{cfg.name}"
     writer = SummaryWriter(log_dir=f"{cfg.logging.log_dir}/tts_{timestamp}")
@@ -75,7 +80,6 @@ def main(cfg: DictConfig = None):
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
     # Load tokenizer and EnCodec
     tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")  # nosec
     tokenizer.set_prefix_tokens(language="en", task="transcribe")
@@ -137,6 +141,7 @@ def main(cfg: DictConfig = None):
         rq_transformer=cfg.model.rq_transformer,
     )
     model.to(device)
+    print("-" * 100)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=cfg.train.learning_rate,
@@ -178,7 +183,6 @@ def main(cfg: DictConfig = None):
         0, cfg.rvq.n_bins, (1, 300, cfg.rvq.n_quantizers), dtype=torch.long
     )
 
-    # Move to device if needed
     token_ids_example = token_ids_example.to(device)
     rvq_token_ids_example = rvq_token_ids_example.to(device)
 
@@ -196,6 +200,7 @@ def main(cfg: DictConfig = None):
     print("-" * 100)
     loss_fn = torch.nn.CrossEntropyLoss()
     # Training loop
+    print(f"\n=== STARTING ON {device} ===")
     model.train()
     for epoch in range(cfg.train.n_epochs):
         if epoch > cfg.train.n_epochs * 0.25 and cfg.train.scheduler_on:
@@ -242,20 +247,20 @@ def main(cfg: DictConfig = None):
 
             # Only update weights every accumulation_steps
             # Scale the loss
-            loss = raw_loss / cfg.train.accumulation_steps
+            loss = raw_loss / accumulation_steps
             loss.backward()
             del rvq_targets, rvq_token_ids
             del target_stack
             # log loss every batch
             writer.add_scalar("Loss/step", raw_loss.item(), global_step)
-            if (global_step + 1) % cfg.train.accumulation_steps == 0:
+            if (global_step + 1) % accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
 
             total_loss += raw_loss.item()
 
             # reconstruct audio from predicted tokens for monitoring
-            if global_step % cfg.logging.save_every == 0:
+            if (global_step + 1) % cfg.logging.save_every == 0:
                 with torch.no_grad():
                     # take argmax as predicted tokens for now (TODO)
                     pred_tokens = torch.argmax(logits, dim=1)
@@ -293,9 +298,9 @@ def main(cfg: DictConfig = None):
                     )
                     print(f"[INFO] Saved checkpoint: model_epoch_{epoch}.pt")
                     encodec_model.to(device)
-            avg_epoch_loss = total_loss / len(dataloader)
-            writer.add_scalar("Loss/epoch", avg_epoch_loss, epoch)
             del logits, encodec_batch, token_ids
+        avg_epoch_loss = total_loss / len(dataloader)
+        writer.add_scalar("Loss/epoch", avg_epoch_loss, epoch)
     torch.save(
         {
             "epoch": cfg.train.n_epochs,
