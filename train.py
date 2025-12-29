@@ -20,6 +20,7 @@ from whisper_normalizer.english import EnglishTextNormalizer
 from datasets import LJSpeechDataset, collate_fn
 from encodec.encodec.encodec import EncodecModel
 from model.tts_model import TTSModel
+from text_bone.tokenizer import SimpleCharTokenizer
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -81,8 +82,11 @@ def main(cfg: DictConfig = None):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Load tokenizer and EnCodec
-    tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")  # nosec
-    tokenizer.set_prefix_tokens(language="en", task="transcribe")
+    if cfg.model.whisper_tokenizer:
+        tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")  # nosec
+        tokenizer.set_prefix_tokens(language="en", task="transcribe")
+    else:
+        tokenizer = SimpleCharTokenizer()
     encodec_model = EncodecModel.encodec_model_24khz()
     encodec_model.to(device)
 
@@ -105,7 +109,11 @@ def main(cfg: DictConfig = None):
                 rows.append(
                     {
                         "file_id": file_id,
-                        "text": english_normalizer(text),
+                        "text": (
+                            english_normalizer(text)
+                            if cfg.model.whisper_tokenizer
+                            else text.strip()
+                        ),
                         "path": str(wav_path),
                     }
                 )
@@ -147,7 +155,7 @@ def main(cfg: DictConfig = None):
         lr=cfg.train.learning_rate,
     )
 
-    if cfg.train.scheduler_on:
+    if cfg.train.scheduler_on and cfg.train.warmup_on:
         effective_training_steps = len(dataloader) * cfg.train.n_epochs
         num_warmup_steps = 0  # int(0.25 * effective_training_steps)
         scheduler = get_cosine_schedule_with_warmup(
@@ -156,7 +164,7 @@ def main(cfg: DictConfig = None):
             num_training_steps=effective_training_steps,
             num_cycles=cfg.train.num_cycles,
         )
-    else:
+    elif cfg.train.scheduler_on:
         scheduler = CosineAnnealingLR(optimizer, T_max=cfg.train.n_epochs, eta_min=1e-6)
 
     # Loading checkpoint

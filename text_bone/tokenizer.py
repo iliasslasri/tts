@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Union
 
+import torch
 from transformers import WhisperTokenizer
 
 
@@ -84,3 +85,66 @@ class TextTokenizer:
         if self.mode == "whisper":
             return self.tokenizer.vocab_size
         return len(self.vocab)
+
+
+class SimpleCharTokenizer:
+    """A simple character-level tokenizer.
+
+    Vocab includes: Special tokens, A-Z, a-z, numbers, and punctuation found in the dataset.
+    """
+
+    def __init__(self):
+        # Special Tokens
+        self.special_tokens = ["<pad>", "<bos>", "<eos>", "<unk>"]
+
+        self.chars = (
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ" "abcdefghijklmnopqrstuvwxyz" "0123456789" " .,?!'-:;\"()"
+        )
+
+        self.vocab = self.special_tokens + list(self.chars)
+        self.token_to_id = {t: i for i, t in enumerate(self.vocab)}
+        self.id_to_token = {i: t for i, t in enumerate(self.vocab)}
+
+    @property
+    def vocab_size(self):
+        return len(self.vocab)
+
+    @property
+    def pad_token_id(self):
+        return self.token_to_id["<pad>"]
+
+    @property
+    def bos_token_id(self):
+        return self.token_to_id["<bos>"]
+
+    @property
+    def eos_token_id(self):
+        return self.token_to_id["<eos>"]
+
+    @property
+    def unk_token_id(self):
+        return self.token_to_id["<unk>"]
+
+    def encode(self, text: str, add_special_tokens: bool = False) -> List[int]:
+        """Converts string to list of IDs."""
+        ids = []
+        for c in text:
+            # Fallback to <unk> if character not in vocab
+            ids.append(self.token_to_id.get(c, self.unk_token_id))
+        return ids
+
+    def decode(self, ids: Union[List[int], torch.Tensor]) -> str:
+        """Converts IDs back to string."""
+        if isinstance(ids, torch.Tensor):
+            ids = ids.tolist()
+
+        chars = []
+        for i in ids:
+            # Skip special tokens during decoding for readability
+            if i >= len(self.special_tokens):
+                chars.append(self.id_to_token.get(i, ""))
+        return "".join(chars)
+
+    # Mock method to satisfy potential calls relying on HF interface
+    def set_prefix_tokens(self, language=None, task=None):
+        pass
