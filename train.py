@@ -206,7 +206,7 @@ def main(cfg: DictConfig = None):
     print(f"Whisper tokenizer vacab size: {text_vocab_size:,}")
     print("-" * 100)
     print("-" * 100)
-    loss_fn = torch.nn.CrossEntropyLoss()
+    loss_fn = torch.nn.CTCLoss()
     # Training loop
     print(f"\n=== STARTING ON {device} ===")
     model.train()

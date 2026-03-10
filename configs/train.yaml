@@ -2,15 +2,15 @@ name: rqt_smpl_tok
 
 train:
   num_samples: 1024
-  n_epochs: 300
+  n_epochs: 600
   batch_size: 1
   accumulation_steps: 256
   sample_rate: 24000
-  learning_rate: 9e-5
+  learning_rate: 8e-5
   bos_token: 0
   weight_decay: 1e-6
-  resume_from_checkpoint: null
-  scheduler_on: True
+  resume_from_checkpoint: "/home/infres/lasri-22/tts/outputs/2025-12-29/00-35-13/runs/tts_20251229_003513_rqt_smpl_tok/checkpoints/checkpoint_final.pt"
+  scheduler_on: False
   warmup_on: False
   num_cycles: 0.25 # cosine scheduler
 
